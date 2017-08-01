@@ -6,7 +6,8 @@ set -e
 function start_module()
 {
   # run "yast <module>" in a new tmux session (-d = detach, -s = session name)
-  tmux new-session -d -s $1 "yast $2"
+  # force 80x25 terminal size
+  tmux new-session -d -s $1 -x 80 -y 25 "yast $2"
 }
 
 function dump_screen()
