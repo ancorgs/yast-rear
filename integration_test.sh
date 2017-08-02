@@ -5,6 +5,7 @@ set -e
 
 function start_module()
 {
+  echo "Starting YaST module '$2'..."
   # run "yast <module>" in a new tmux session (-d = detach, -s = session name)
   # force 80x25 terminal size
   tmux new-session -d -s $1 -x 80 -y 25 "yast $2"
@@ -39,9 +40,32 @@ function not_expect_text()
   fi
 }
 
-function send_keys() {
+function send_keys()
+{
   echo "Sending keys: $2"
   tmux send-keys -t "$1" "$2"
+}
+
+function yast_exited()
+{
+  if tmux has-session "$1" 2> /dev/null; then
+    echo "ERROR: YaST is still running!"
+    exit 1
+  else
+    echo "YaST exited, OK"
+  fi
+}
+
+function skip_unsupported()
+{
+  # Bootloader is not configured (does not make sense in Docker),
+  # so there is a warning displayed.
+  if tmux capture-pane -p -t "$SESSION" | grep -q "This system is not supported by rear"; then
+    echo "Ignoring 'unsupported system' warning"
+    # Press "Ignore" (Alt-i shortcut)
+    send_keys $SESSION "M-i"
+    sleep 3
+  fi
 }
 
 # additionally install tmux
@@ -56,6 +80,11 @@ rpm -iv --force --nodeps /usr/src/packages/RPMS/*/*.rpm
 # name of the tmux session
 SESSION=yast2_rear
 
+
+###
+### Start the module and change one option
+###
+
 # run "yast rear" in a new session
 start_module $SESSION rear
 
@@ -66,16 +95,9 @@ sleep 3
 
 dump_screen $SESSION
 not_expect_text $SESSION "Internal error"
-# Bootloader is not configured (does not make sense in Docker),
-# so this is OK actually
-# TODO: when running the script outside Docker the bootloader might be configured,
-# make this step optional depending on the /etc/sysconfig/bootloader:LOADER_TYPE value
-expect_text $SESSION "This system is not supported by rear"
-expect_text $SESSION "Bootloader none is used"
-# Press "Ignore" (Alt-i shortcut)
-send_keys $SESSION "M-i"
 
-sleep 3
+skip_unsupported
+ 
 dump_screen $SESSION
 expect_text $SESSION "Your ReaR configuration needs to be modified"
 # Press "OK" (F10 shortcut)
@@ -84,10 +106,46 @@ send_keys $SESSION "F10"
 sleep 3
 dump_screen $SESSION
 expect_text $SESSION "Rear Configuration"
-# the configuration is not trivial, just abort right now...
+
+# activate the "Boot Media" widget
+send_keys $SESSION "M-b"
+# select the "USB" option
+send_keys $SESSION "Down"
+send_keys $SESSION "Enter"
+
+sleep 1
+dump_screen $SESSION
+# ensure it is selected
+expect_text $SESSION "USB"
+not_expect_text $SESSION "ISO"
+
+# save the configuration
+send_keys $SESSION "F10"
+
+sleep 3
+yast_exited $SESSION
+
+###
+### Start the module again and check that the change was saved properly
+###
+
+start_module $SESSION rear
+# wait a bit to ensure YaST is up
+sleep 3
+
+skip_unsupported
+
+dump_screen $SESSION
+# USB should be selected as the boot medium
+expect_text $SESSION "USB"
+not_expect_text $SESSION "ISO"
+
+# abort
 send_keys $SESSION "F9"
 
-# TODO: check if YaST exited properly
+sleep 3
+yast_exited $SESSION
+
 
 # TODO: trap the signals and do a cleanup at the end
-# (kill YaST if it is still running, tmux kill-session ?)
+# (kill YaST if it is still running, use tmux kill-session ?)
